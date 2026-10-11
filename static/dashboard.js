@@ -842,18 +842,25 @@ function ringTone(){
     o.connect(g).connect(actx.destination); o.start(actx.currentTime + t); o.stop(actx.currentTime + t + .4); }));
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
-function callSay(who, say){
+// Speak one line of the call. onStart runs when the voice actually starts (so the transcript matches the audio);
+// resolves when it ends. Only one line plays at a time: a slow line delays the next, it's never talked over.
+function callSay(who, say, onStart){
   const text = say.replace(/\[[^\]]*\]\s*/g, "");
   return new Promise(resolve => {
-    const done = () => { clearTimeout(t); resolve(); };
-    const t = setTimeout(resolve, Math.max(2500, text.length * 75));   // never hang the call
-    if(!voiceOn || !audioOK){ clearTimeout(t); setTimeout(resolve, Math.max(1600, text.length * 45)); return; }
-    const silent = () => { clearTimeout(t); setTimeout(resolve, Math.max(1600, text.length * 45)); };
-    if(!(S && S.mode && S.mode.voice === "elevenlabs")) return silent();
+    let started = false, finished = false, t;
+    const finish = () => { if(finished) return; finished = true; clearTimeout(t); resolve(); };
+    const start = () => { if(started) return; started = true; onStart(); };
+    const silent = () => { if(finished) return; start(); clearTimeout(t); t = setTimeout(finish, Math.max(1600, text.length * 45)); };
+    if(!voiceOn || !audioOK || !(S && S.mode && S.mode.voice === "elevenlabs")) return silent();
     const url = `/api/tts?who=${encodeURIComponent(who)}&text=${encodeURIComponent(say)}`;
     let a = audioFor(who, say);
     if(a.error){ delete audioCache[url]; a = audioFor(who, say); }   // an earlier fetch failed (e.g. the voice service was busy): try again
-    a.currentTime = 0; a.onended = done; a.onerror = silent;
+    stopCallAudio();   // nothing else on the line
+    a.currentTime = 0;
+    a.onplaying = () => { start(); clearTimeout(t);   // playing: wait for the end (backstop: its length plus a little)
+      t = setTimeout(finish, ((isFinite(a.duration) ? a.duration : text.length * 0.09) + 3) * 1000); };
+    a.onended = finish; a.onerror = silent;
+    t = setTimeout(silent, 15000);   // the voice never arrived: show the line and move on
     a.play().catch(silent);
   });
 }
@@ -902,8 +909,8 @@ async function startCall(n){
   me.phase = "talk"; me.t0 = Date.now();
   for(const ln of sc.lines){
     if(call !== me) return;
-    me.talking = ln.side; me.said.push(ln); drawCall();
-    await callSay(ln.who, ln.say);
+    await callSay(ln.who, ln.say, () => { if(call === me){ me.talking = ln.side; me.said.push(ln); drawCall(); } });
+    if(call !== me) return;
     me.talking = null; drawCall(); await wait(350);
   }
   me.phase = "ended"; me.secs = Math.round((Date.now() - me.t0) / 1000); drawCall();
