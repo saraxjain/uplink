@@ -339,7 +339,9 @@ def api_voice_donation():
             text = voice.transcribe(f.read(), f.filename or "say.webm", f.mimetype or "audio/webm")
             stt = "elevenlabs"
         except Exception as e:  # noqa: BLE001
-            return jsonify(error=f"Couldn't transcribe that ({type(e).__name__}). Try again or tap items instead."), 502
+            if not text:   # no browser transcript to fall back on
+                return jsonify(error=f"Couldn't transcribe that ({type(e).__name__}). Try again or tap items instead."), 502
+            print(f"Scribe failed ({type(e).__name__}); using the browser's transcript", flush=True)
     if not text:
         return jsonify(error="Didn't catch anything. Tap the mic and say what's left, like 'twenty turkey sandwiches'."), 400
     lines, extras, parser = menu.parse_speech(biz, text)
