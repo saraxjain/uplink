@@ -392,7 +392,7 @@ function drawHuman(){
     <div class="human" role="alert"><span class="h-tag">Decision needed · coordinator</span>
       <div class="h-title">The agents are asking a person to decide ${esc(d.id)}</div>
       <div class="h-why"><b>Why:</b> ${esc(d.why||"the agents could not agree")}. ${esc(d.food.items.join(", "))}, ${d.minutes_left} min until unsafe.</div>
-      ${d.decide_by?`<div class="h-why"><b>Decide by ${esc(d.decide_by)}.</b> After that, the agents' top option that can still arrive safely goes automatically.</div>`:""}
+      ${d.decide_by?`<div class="h-why"><b>Decide by ${esc(d.decide_by)}.</b> After that, the agents' top option that can still arrive safely goes automatically. While this page is open, the simulated clock waits for you.</div>`:""}
       <div class="opts">${d.options.map(o=>`<button class="opt" onclick="approve('${d.id}','${o.id}')"><b>${esc(o.np_name)}</b><span class="meta">via ${esc(o.driver_name)} · ${o.dur} min · $${o.cost.toFixed(2)}</span><span class="go">Approve this plan</span></button>`).join("")}</div></div>`).join("")
   + asking.map(d=>`
     <div class="human ask" role="alert"><span class="h-tag">Question for the business</span>
@@ -492,7 +492,8 @@ function drawGlobal(){
 function drawLive(){
   const scn = (S.scenarios.find(x=>x.name===S.scenario)||{}).title;
   const run = $("sl-run");
-  run.className = "pill " + (S.paused ? "warn" : S.holding ? "outline" : "ok"); run.textContent = S.paused ? "Paused" : S.holding ? "Dispatcher calling · driver waits" : `Running ${S.speed}×`;
+  run.className = "pill " + (S.paused || S.waiting_person ? "warn" : S.holding ? "outline" : "ok");
+  run.textContent = S.paused ? "Paused" : S.waiting_person ? "Waiting for a person · clock paused" : S.holding ? "Dispatcher calling · driver waits" : `Running ${S.speed}×`;
   setHTML("sl-scn", scn ? esc(scn.split(":")[0]) : "No scenario running");
   setHTML("sl-extra", `${S.donations.length} donation${S.donations.length===1?"":"s"} · ${S.agents_online ? S.agents_online.shelters+" shelters · "+S.agents_online.drivers+" drivers" : ""}`);
   const pend = pendingList(), al = $("live-alert");

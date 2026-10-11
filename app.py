@@ -71,6 +71,12 @@ def start_mesh():
 HOLD_MAX = 75   # seconds the clock waits for the dashboard to finish the call before moving on anyway
 
 
+def waiting_on_person(w):
+    """A coordinator or business is being asked and someone is watching /ops (so a person can answer)."""
+    return time.time() - state.get("ops_seen", 0) < 5 and any(
+        d["status"] in ("awaiting_human", "awaiting_info") for d in w.donations)
+
+
 def clock_loop():
     """1 simulated minute per real second (times the speed setting). Pauses while agents deliberate."""
     while True:
@@ -79,6 +85,8 @@ def clock_loop():
             w = W()
             if state["paused"] or w.busy or time.time() < state.get("hold_until", 0):
                 continue   # paused, agents deliberating, or the dispatcher's call is still playing on /ops
+            if waiting_on_person(w):
+                continue   # a person is deciding on /ops: simulated minutes would be real seconds, so the clock waits
             drv = state.pop("cancel_after_call", None)
             if drv:   # "Driver cancels" was pressed during the call: the driver cancels as they would set off
                 w.cancel_driver(drv)
@@ -196,6 +204,8 @@ def api_state():
     s["speed"] = state["speed"]
     s["paused"] = state["paused"]
     s["holding"] = time.time() < state.get("hold_until", 0)
+    with lock:
+        s["waiting_person"] = waiting_on_person(W())
     prov = llm.provider()
     claude = prov == "anthropic"
     s["mode"] = {"agents": "llm" if agents.use_llm() else "rules", "vision": prov or "demo",
