@@ -621,13 +621,25 @@ $("sayBtn").onclick = async () => {
   try{ stream = await navigator.mediaDevices.getUserMedia({audio:true}); }
   catch(e){ sayState("Tap to talk", "Microphone blocked. Allow it in the browser (works on localhost or https).", false); return; }
   const chunks = [];
+  // the browser listens too, so its transcript can stand in if ElevenLabs fails (e.g. out of credits)
+  let heard = "", sr = null;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(SR){ try{ sr = new SR(); sr.lang = "en-US"; sr.continuous = true;
+    sr.onresult = e => { heard = Array.from(e.results).map(r => r[0].transcript).join(" "); }; sr.start(); }catch(e){ sr = null; } }
   sayRec = new MediaRecorder(stream);
   sayRec.ondataavailable = e => chunks.push(e.data);
   sayRec.onstop = () => {
     stream.getTracks().forEach(t => t.stop());
     const type = sayRec.mimeType || "audio/webm";
-    const f = new FormData(); f.append("audio", new Blob(chunks, {type}), type.includes("mp4") ? "say.mp4" : "say.webm");
-    sendSaid(f);
+    let sent = false;
+    const send = () => {
+      if(sent) return; sent = true;
+      const f = new FormData(); f.append("audio", new Blob(chunks, {type}), type.includes("mp4") ? "say.mp4" : "say.webm");
+      if(heard.trim()) f.append("text", heard.trim());
+      sendSaid(f);
+    };
+    if(sr){ sr.onend = send; try{ sr.stop(); }catch(e){ send(); } setTimeout(send, 1500); }   // whichever comes first
+    else send();
   };
   sayRec.start(); sayState("Listening… tap when done", "Recording stops by itself after 15 seconds.", true);
   setTimeout(() => { if(sayRec && sayRec.state === "recording") sayRec.stop(); }, 15000);

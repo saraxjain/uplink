@@ -392,7 +392,7 @@ function drawHuman(){
     <div class="human" role="alert"><span class="h-tag">Decision needed · coordinator</span>
       <div class="h-title">The agents are asking a person to decide ${esc(d.id)}</div>
       <div class="h-why"><b>Why:</b> ${esc(d.why||"the agents could not agree")}. ${esc(d.food.items.join(", "))}, ${d.minutes_left} min until unsafe.</div>
-      ${d.decide_by?`<div class="h-why"><b>Decide by ${esc(d.decide_by)}.</b> After that, the agents' top option that can still arrive safely goes automatically.</div>`:""}
+      ${d.decide_by?`<div class="h-why"><b>Decide by ${esc(d.decide_by)}.</b> After that, the agents' top option that can still arrive safely goes automatically. While this page is open, the simulated clock waits for you.</div>`:""}
       <div class="opts">${d.options.map(o=>`<button class="opt" onclick="approve('${d.id}','${o.id}')"><b>${esc(o.np_name)}</b><span class="meta">via ${esc(o.driver_name)} · ${o.dur} min · $${o.cost.toFixed(2)}</span><span class="go">Approve this plan</span></button>`).join("")}</div></div>`).join("")
   + asking.map(d=>`
     <div class="human ask" role="alert"><span class="h-tag">Question for the business</span>
@@ -492,7 +492,8 @@ function drawGlobal(){
 function drawLive(){
   const scn = (S.scenarios.find(x=>x.name===S.scenario)||{}).title;
   const run = $("sl-run");
-  run.className = "pill " + (S.paused ? "warn" : S.holding ? "outline" : "ok"); run.textContent = S.paused ? "Paused" : S.holding ? "Dispatcher calling · driver waits" : `Running ${S.speed}×`;
+  run.className = "pill " + (S.paused || S.waiting_person ? "warn" : S.holding ? "outline" : "ok");
+  run.textContent = S.paused ? "Paused" : S.waiting_person ? "Waiting for a person · clock paused" : S.holding ? "Dispatcher calling · driver waits" : `Running ${S.speed}×`;
   setHTML("sl-scn", scn ? esc(scn.split(":")[0]) : "No scenario running");
   setHTML("sl-extra", `${S.donations.length} donation${S.donations.length===1?"":"s"} · ${S.agents_online ? S.agents_online.shelters+" shelters · "+S.agents_online.drivers+" drivers" : ""}`);
   const pend = pendingList(), al = $("live-alert");
@@ -842,18 +843,25 @@ function ringTone(){
     o.connect(g).connect(actx.destination); o.start(actx.currentTime + t); o.stop(actx.currentTime + t + .4); }));
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
-function callSay(who, say){
+// Speak one line of the call. onStart runs when the voice actually starts (so the transcript matches the audio);
+// resolves when it ends. Only one line plays at a time: a slow line delays the next, it's never talked over.
+function callSay(who, say, onStart){
   const text = say.replace(/\[[^\]]*\]\s*/g, "");
   return new Promise(resolve => {
-    const done = () => { clearTimeout(t); resolve(); };
-    const t = setTimeout(resolve, Math.max(2500, text.length * 75));   // never hang the call
-    if(!voiceOn || !audioOK){ clearTimeout(t); setTimeout(resolve, Math.max(1600, text.length * 45)); return; }
-    const silent = () => { clearTimeout(t); setTimeout(resolve, Math.max(1600, text.length * 45)); };
-    if(!(S && S.mode && S.mode.voice === "elevenlabs")) return silent();
+    let started = false, finished = false, t;
+    const finish = () => { if(finished) return; finished = true; clearTimeout(t); resolve(); };
+    const start = () => { if(started) return; started = true; onStart(); };
+    const silent = () => { if(finished) return; start(); clearTimeout(t); t = setTimeout(finish, Math.max(1600, text.length * 45)); };
+    if(!voiceOn || !audioOK || !(S && S.mode && S.mode.voice === "elevenlabs")) return silent();
     const url = `/api/tts?who=${encodeURIComponent(who)}&text=${encodeURIComponent(say)}`;
     let a = audioFor(who, say);
     if(a.error){ delete audioCache[url]; a = audioFor(who, say); }   // an earlier fetch failed (e.g. the voice service was busy): try again
-    a.currentTime = 0; a.onended = done; a.onerror = silent;
+    stopCallAudio();   // nothing else on the line
+    a.currentTime = 0;
+    a.onplaying = () => { start(); clearTimeout(t);   // playing: wait for the end (backstop: its length plus a little)
+      t = setTimeout(finish, ((isFinite(a.duration) ? a.duration : text.length * 0.09) + 3) * 1000); };
+    a.onended = finish; a.onerror = silent;
+    t = setTimeout(silent, 15000);   // the voice never arrived: show the line and move on
     a.play().catch(silent);
   });
 }
@@ -902,8 +910,8 @@ async function startCall(n){
   me.phase = "talk"; me.t0 = Date.now();
   for(const ln of sc.lines){
     if(call !== me) return;
-    me.talking = ln.side; me.said.push(ln); drawCall();
-    await callSay(ln.who, ln.say);
+    await callSay(ln.who, ln.say, () => { if(call === me){ me.talking = ln.side; me.said.push(ln); drawCall(); } });
+    if(call !== me) return;
     me.talking = null; drawCall(); await wait(350);
   }
   me.phase = "ended"; me.secs = Math.round((Date.now() - me.t0) / 1000); drawCall();

@@ -457,6 +457,12 @@ def negotiate(world, d, plans, council=None):
         llm_ok = llm_ok or any(cast[a][1] for a in AGENTS)
         votes = {pid: {a: cast[a][0][pid] for a in AGENTS} for pid in proposed}
 
+        for a in AGENTS:   # an agent that proposed a plan its own vote rejects says so, instead of "I can live with it"
+            v = votes[proposals[a]][a]
+            if not v["accept"]:
+                m = next(m for m in messages if m["agent"] == a and m["type"] == "propose")
+                m["text"] = (f"{m['text'].split('. ')[0]}: the only plan nobody has vetoed, "
+                             f"but I still can't accept it. {v['reason']}")
         for pid in proposed:
             for a in AGENTS:
                 v = votes[pid][a]
